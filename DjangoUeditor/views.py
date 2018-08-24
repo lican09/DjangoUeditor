@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
-from importlib import import_module
-from django.http import HttpResponse
-from . import settings as USettings
 import os
 import json
-from django.views.decorators.csrf import csrf_exempt
 import datetime
 import random
-from django.utils import six
 
+from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.utils import six
 from django.utils.six.moves.urllib.request import urlopen
 from django.utils.six.moves.urllib.parse import urljoin
+from django.utils.module_loading import import_string
+from django.conf import settings
+
+from importlib import import_module
+from . import settings as USettings
 
 
 if six.PY3:
@@ -40,7 +43,7 @@ def save_upload_file(PostFile, FilePath):
         f.close()
         return u"写入文件错误: {}".format(E.message)
     f.close()
-    return u"SUCCESS"
+    return urljoin(USettings.gSettings.MEDIA_URL, OutputPathFormat),
 
 
 @csrf_exempt
@@ -224,26 +227,25 @@ def UploadFile(request):
     # 所有检测完成后写入文件
     if state == "SUCCESS":
         if action == "uploadscrawl":
-            state = save_scrawl_file(
+            url = save_scrawl_file(
                 request, os.path.join(OutputPath, OutputFile))
         else:
-            # 保存到文件中，如果保存错误，需要返回ERROR
-            upload_module_name = USettings.UEditorUploadSettings.get(
-                "upload_module", None)
-            if upload_module_name:
-                mod = import_module(upload_module_name)
-                state = mod.upload(file, OutputPathFormat)
+            # 保存到文件中
+            save_func_str = getattr(settings, 'DJANGO_UEDITOR_SAVE_FILE_FUNC')
+            if not save_func_str:
+                state = save_upload_file(file, os.path.join(OutputPath, OutputFile))
+                url = urljoin(USettings.gSettings.MEDIA_URL, OutputPathFormat)
             else:
-                state = save_upload_file(
-                    file, os.path.join(OutputPath, OutputFile))
+                save_func= import_string(save_func_str)
+                url = save_func(file, os.path.join(OutputPath, OutputFile))
 
     # 返回数据
     return_info = {
         # 保存后的文件名称
-        'url': urljoin(USettings.gSettings.MEDIA_URL, OutputPathFormat),
+        'url': url,
         'original': upload_file_name,  # 原始文件名
         'type': upload_original_ext,
-        'state': state,  # 上传状态，成功时返回SUCCESS,其他任何值将原样返回至图片上传框中
+        'state': 'SUCCESS',  # 上传状态，成功时返回SUCCESS,其他任何值将原样返回至图片上传框中
         'size': upload_file_size
     }
     return HttpResponse(json.dumps(return_info, ensure_ascii=False), content_type="application/javascript")
